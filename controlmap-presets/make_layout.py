@@ -11,7 +11,7 @@ def argb(v):  # unsigned 0xAARRGGBB -> signed int32 (Amethyst stores ints)
 BTN_BG   = argb(0x59000000)   # Roblox-like dark translucent
 STROKE   = argb(0x80FFFFFF)
 
-def button(name, keys, x, y, w, h, icon=None, game=True, menu=False, toggle=False, radius=40, stroke=1.5, bg=BTN_BG):
+def button(name, keys, x, y, w, h, icon=None, game=True, menu=False, toggle=False, radius=40, stroke=1.5, bg=BTN_BG, iconOn=None):
     k = (keys + [0, 0, 0, 0])[:4]
     d = {
         "name": name, "keycodes": k, "dynamicX": x, "dynamicY": y,
@@ -22,6 +22,8 @@ def button(name, keys, x, y, w, h, icon=None, game=True, menu=False, toggle=Fals
     }
     if icon:
         d["icon"] = icon
+    if iconOn:
+        d["iconOn"] = iconOn
     return d
 
 def at(xdp):  # left offset in dp -> expression (px)
@@ -33,13 +35,24 @@ TOP = "px(10)"
 
 controls = [
     # ---- top-left bar (in game) ----
-    button("しゃがむ", [KEY["LSHIFT"]], at(10 + STEP*1), TOP, S, S, icon="arrow.down.to.line", menu=True, toggle=True),
-    button("持ち物", [KEY["E"]], at(10 + STEP*2), TOP, S, S, icon="square.grid.3x3.fill"),
-    button("チャット", [KEY["T"]], at(10 + STEP*3), TOP, S, S, icon="bubble.left.fill"),
-    button("ポーズ", [KEY["ESC"]], at(10 + STEP*4), TOP, S, S, icon="pause.fill"),
+    button("持ち物", [KEY["E"]], at(10 + STEP*1), TOP, S, S, icon="square.grid.3x3.fill"),
+    button("チャット", [KEY["T"]], at(10 + STEP*2), TOP, S, S, icon="bubble.left.fill"),
+    button("ポーズ", [KEY["ESC"]], at(10 + STEP*3), TOP, S, S, icon="pause.fill"),
     # ---- top-left bar (menus / inventory) ----
     button("✕", [KEY["ESC"]], at(10), TOP, S, S, icon="xmark", game=False, menu=True),
-    button("キーボード", [KEYBOARD], at(10 + STEP*2), TOP, S, S, icon="keyboard", game=False, menu=True),
+    button("キーボード", [KEYBOARD], at(10 + STEP*1), TOP, S, S, icon="keyboard", game=False, menu=True),
+    # ---- always-visible essentials above jump / attack ----
+    button("しゃがむ", [KEY["LSHIFT"]], "${screen_width} - ${width} - px(64)",
+           "${screen_height} - ${height} - px(176)", 72, 72, icon="arrow.down.to.line",
+           menu=True, toggle=True, radius=100, stroke=2, bg=argb(0x99000000), iconOn="arrow.down.to.line.compact"),
+    button("ダッシュ", [341], "${screen_width} - ${width} - px(184)",
+           "${screen_height} - ${height} - px(176)", 72, 72, icon="tortoise.fill",
+           toggle=True, radius=100, stroke=2, bg=argb(0x99000000), iconOn="hare.fill"),
+    # ---- attack / break button (left of jump). Tap gestures only give right click,
+    #      and long-press (400 ms) is too slow for fighting ----
+    button("攻撃", [-3], "${screen_width} - ${width} - px(178)",
+           "${screen_height} - ${height} - px(62)", 84, 84, icon="hammer.fill", radius=100, stroke=2,
+           bg=argb(0x66000000)),
     # ---- Roblox-style jump button (bottom right) ----
     button("ジャンプ", [KEY["SPACE"]], "${screen_width} - ${width} - px(44)",
            "${screen_height} - ${height} - px(48)", 112, 112, icon="arrow.up", radius=100, stroke=2,
@@ -51,6 +64,7 @@ items = [
     ("視点切替 (F5)", [KEY["F5"]], False),
     ("プレイヤー一覧", [KEY["TAB"]], True),
     ("アイテムを捨てる", [KEY["Q"]], False),
+    ("ブロックを複製 (中クリック)", [-6], False),
     ("左右の手を持ち替え", [KEY["F"]], False),
     ("HUD 表示切替 (F1)", [KEY["F1"]], False),
     ("デバッグ表示 (F3)", [KEY["F3"]], False),
@@ -76,8 +90,8 @@ joystick.update({
     "strokeColor": argb(0x99FFFFFF),
     "forwardLock": False, "absolute": False,
     "floating": True, "stickSize": 150, "deadzone": 0.2,
-    "autoSprint": True, "sprintThreshold": 0.9,
-    "thumbColor": argb(0xDDFFFFFF), "idleOpacity": 0.35,
+    "autoSprint": False, "sprintThreshold": 0.9,
+    "thumbColor": argb(0xDDFFFFFF), "idleOpacity": 0.6,
     "displayInGame": True, "displayInMenu": False,
 })
 

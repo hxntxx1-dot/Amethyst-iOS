@@ -51,7 +51,8 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
 @property(nonatomic) UIView *background, *thumb;
 @property(nonatomic) UIButton *fwdLockView;
 @property(nonatomic) UILabel *zoneLabel;
-@property(nonatomic) CGPoint mCenter;
+@property(nonatomic) CGPoint mCenter;   // where the ring is drawn
+@property(nonatomic) CGPoint origin;    // input origin (floating: may differ from mCenter near the zone edge)
 @property(nonatomic, weak) UITouch *activeTouch;
 @property(nonatomic) int lastDirection;
 @property(nonatomic) BOOL sprintHeld;
@@ -145,6 +146,15 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
     return CGPointMake(x, y);
 }
 
+// Keep the whole ring inside the zone (floating mode)
+- (CGPoint)clampCenterToZone:(CGPoint)point {
+    CGFloat r = [self stickSize] / 2.0;
+    CGSize size = self.bounds.size;
+    CGFloat x = size.width >= 2*r ? MIN(MAX(point.x, r), size.width - r) : size.width / 2.0;
+    CGFloat y = size.height >= 2*r ? MIN(MAX(point.y, r), size.height - r) : size.height / 2.0;
+    return CGPointMake(x, y);
+}
+
 - (void)setStickActive:(BOOL)active {
     if (![self isFloating]) {
         self.background.alpha = self.thumb.alpha = 1.0;
@@ -167,8 +177,11 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
 
     CGPoint location = [touch locationInView:self];
     if ([self isFloating]) {
-        // Spawn the stick under the finger
-        self.mCenter = location;
+        // Spawn the stick under the finger. The input origin is the finger
+        // itself (so the first touch never moves you), while the drawn ring
+        // is kept fully inside the zone.
+        self.origin = location;
+        self.mCenter = [self clampCenterToZone:location];
         self.background.center = self.mCenter;
         self.thumb.center = self.mCenter;
         [self setStickActive:YES];
@@ -214,6 +227,7 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
 - (void)resetStick {
     [self applyDirection:DIRECTION_NONE sprint:NO];
     self.mCenter = [self restCenter];
+    self.origin = self.mCenter;
     self.background.center = self.mCenter;
     self.thumb.center = self.mCenter;
     [self setStickActive:NO];
@@ -221,22 +235,25 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
 
 - (void)handleTouchAt:(CGPoint)location {
     CGFloat maxRadius = MAX([self maxRadius], 1.0);
-    CGFloat dirX = location.x - self.mCenter.x;
-    CGFloat dirY = location.y - self.mCenter.y;
+    BOOL floating = [self isFloating];
+    CGPoint origin = floating ? self.origin : self.mCenter;
+    CGFloat dirX = location.x - origin.x;
+    CGFloat dirY = location.y - origin.y;
     CGFloat radius = sqrt(dirX*dirX + dirY*dirY);
 
     if (radius > maxRadius) {
-        if ([self isFloating]) {
-            // Drag the whole stick along with the finger
-            CGPoint center = self.mCenter;
-            center.x = location.x - dirX * maxRadius / radius;
-            center.y = location.y - dirY * maxRadius / radius;
-            self.mCenter = center;
-            self.background.center = center;
-        }
         dirX = dirX * maxRadius / radius;
         dirY = dirY * maxRadius / radius;
         radius = maxRadius;
+        if (floating) {
+            // Drag the stick along with the finger...
+            self.origin = CGPointMake(location.x - dirX, location.y - dirY);
+        }
+    }
+    if (floating) {
+        // ...but always draw it fully inside the zone
+        self.mCenter = [self clampCenterToZone:self.origin];
+        self.background.center = self.mCenter;
     }
     self.thumb.center = CGPointMake(self.mCenter.x + dirX, self.mCenter.y + dirY);
 
@@ -348,6 +365,7 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
 
     if (self.activeTouch == nil) {
         self.mCenter = [self restCenter];
+        self.origin = self.mCenter;
     }
     self.background.center = self.mCenter;
     self.thumb.center = self.mCenter;

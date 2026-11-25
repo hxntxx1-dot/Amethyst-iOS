@@ -13,6 +13,7 @@
   string = [string stringByReplacingOccurrencesOfString:[NSString stringWithFormat:@"${%@}", @(KEY)] withString:VALUE];
 
 @implementation ControlButton
+@synthesize isToggleOn = _isToggleOn;
 
 + (void)load {
     Class NSPredicateUtilities = objc_getMetaClass("_NSPredicateUtilities");
@@ -201,15 +202,41 @@
     self.layer.cornerRadius = MIN(self.frame.size.width, self.frame.size.height) / 200.0 * propCornerRadius;
     self.layer.borderWidth = propStrokeWidth;
 
-    // Optional "icon": an SF Symbol name (e.g. "arrow.up"). When the symbol
-    // exists the button shows only the icon; otherwise it falls back to "name".
-    UIImage *icon = nil;
+    [self applyIconAndToggleAppearance];
+}
+
+// Optional "icon": an SF Symbol name (e.g. "arrow.up"). When the symbol
+// exists the button shows only the icon; otherwise it falls back to "name".
+// Optional "iconOn": icon shown while a toggle button is ON.
+- (UIImage *)iconForCurrentState {
     NSString *iconName = self.properties[@"icon"];
-    if ([iconName isKindOfClass:NSString.class] && iconName.length > 0) {
-        CGFloat pointSize = MAX(MIN(propW, propH) * 0.42, 10.0);
-        UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration
-            configurationWithPointSize:pointSize weight:UIImageSymbolWeightBold];
-        icon = [UIImage systemImageNamed:iconName withConfiguration:config];
+    NSString *iconOn = self.properties[@"iconOn"];
+    if (self.isToggleOn && [iconOn isKindOfClass:NSString.class] && iconOn.length > 0) {
+        iconName = iconOn;
+    }
+    if (![iconName isKindOfClass:NSString.class] || iconName.length == 0) {
+        return nil;
+    }
+    CGFloat propW = [self.properties[@"width"] floatValue];
+    CGFloat propH = [self.properties[@"height"] floatValue];
+    CGFloat pointSize = MAX(MIN(propW, propH) * 0.42, 10.0);
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration
+        configurationWithPointSize:pointSize weight:UIImageSymbolWeightBold];
+    return [UIImage systemImageNamed:iconName withConfiguration:config];
+}
+
+- (void)applyIconAndToggleAppearance {
+    UIImage *icon = [self iconForCurrentState];
+
+    // Make the ON state of toggle buttons obvious: thick bright border
+    float propStrokeWidth = [self.properties[@"strokeWidth"] floatValue];
+    int propStrokeColor = [self.properties[@"strokeColor"] intValue];
+    if ([self.properties[@"isToggle"] boolValue] && self.isToggleOn && !isControlModifiable) {
+        self.layer.borderWidth = MAX(propStrokeWidth, 4.0);
+        self.layer.borderColor = UIColor.whiteColor.CGColor;
+    } else {
+        self.layer.borderWidth = propStrokeWidth;
+        self.layer.borderColor = [convertARGB2UIColor(propStrokeColor) CGColor];
     }
 
     [UIView performWithoutAnimation:^{
@@ -217,6 +244,25 @@
         [self setTitle:(icon ? nil : self.properties[@"name"]) forState:UIControlStateNormal];
         [self layoutIfNeeded];
     }];
+}
+
+- (BOOL)isToggleOn {
+    @synchronized (self) {
+        return _isToggleOn;
+    }
+}
+
+- (void)setIsToggleOn:(BOOL)isToggleOn {
+    @synchronized (self) {
+        _isToggleOn = isToggleOn;
+    }
+    if (NSThread.isMainThread) {
+        [self applyIconAndToggleAppearance];
+    } else {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self applyIconAndToggleAppearance];
+        });
+    }
 }
 
 // NOTE: Unlike Android's impl, this method uses dp instead of px (no call to dpToPx), "view.center" instead of "view.pos + view.size/2"
