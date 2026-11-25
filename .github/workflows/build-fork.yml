@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     if: github.repository != 'AngelAuraMC/Amethyst-iOS'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 120
     steps:
       - name: Checkout repository
@@ -25,6 +25,14 @@ jobs:
         with:
           distribution: zulu
           java-version: '8'
+
+      - name: Select newest Xcode (iOS 26 SDK is required)
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: Install build tools
         run: |
