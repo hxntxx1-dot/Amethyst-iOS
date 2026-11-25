@@ -611,7 +611,7 @@ CGFloat currentY;
 @property(nonatomic) UITextView* editMapping;
 @property(nonatomic) UIPickerView* pickerMapping;
 @property(nonatomic) UISegmentedControl *ctrlOrientation, *ctrlVisibility;
-@property(nonatomic) UISwitch *switchFwdLock, *switchToggleable, *switchMousePass, *switchSwipeable;
+@property(nonatomic) UISwitch *switchFwdLock, *switchFloating, *switchAutoSprint, *switchToggleable, *switchMousePass, *switchSwipeable;
 @property(nonatomic) UIColorWell *colorWellBackground, *colorWellStroke;
 @property(nonatomic) DBNumberedSlider *sliderStrokeWidth, *sliderCornerRadius, *sliderOpacity;
 
@@ -742,6 +742,20 @@ CGFloat currentY;
         [self.switchFwdLock setOn:[self.targetButton.properties[@"forwardLock"] boolValue] animated:NO];
         [self.scrollView addSubview:self.switchFwdLock];
         currentY += labelFwdLock.frame.size.height + 15.0;
+
+        // Property: Floating (Roblox-style dynamic stick)
+        UILabel *labelFloating = [self addLabel:localize(@"custom_controls.button_edit.floating", nil)];
+        self.switchFloating = [[UISwitch alloc] initWithFrame:CGRectMake(width - 62.0, currentY - 5.0, 50.0, 30)];
+        [self.switchFloating setOn:[self.targetButton.properties[@"floating"] boolValue] animated:NO];
+        [self.scrollView addSubview:self.switchFloating];
+        currentY += labelFloating.frame.size.height + 15.0;
+
+        // Property: Auto sprint
+        UILabel *labelAutoSprint = [self addLabel:localize(@"custom_controls.button_edit.auto_sprint", nil)];
+        self.switchAutoSprint = [[UISwitch alloc] initWithFrame:CGRectMake(width - 62.0, currentY - 5.0, 50.0, 30)];
+        [self.switchAutoSprint setOn:[self.targetButton.properties[@"autoSprint"] boolValue] animated:NO];
+        [self.scrollView addSubview:self.switchAutoSprint];
+        currentY += labelAutoSprint.frame.size.height + 15.0;
     } else {
         // Property: Mapping
         UILabel *labelMapping = [self addLabel:localize(@"custom_controls.button_edit.mapping", nil)];
@@ -907,6 +921,15 @@ CGFloat currentY;
 - (void)actionEditFinish {
     if (self.switchFwdLock) {
         self.targetButton.properties[@"forwardLock"] = @(self.switchFwdLock.isOn);
+    }
+    if (self.switchFloating) {
+        self.targetButton.properties[@"floating"] = @(self.switchFloating.isOn);
+        if (self.switchFloating.isOn && !self.targetButton.properties[@"stickSize"]) {
+            self.targetButton.properties[@"stickSize"] = @(150.0);
+        }
+    }
+    if (self.switchAutoSprint) {
+        self.targetButton.properties[@"autoSprint"] = @(self.switchAutoSprint.isOn);
     }
     self.targetButton.properties[@"isToggle"] = @(self.switchToggleable.isOn);
     self.targetButton.properties[@"passThruEnabled"] = @(self.switchMousePass.isOn);

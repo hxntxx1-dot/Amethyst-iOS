@@ -201,8 +201,20 @@
     self.layer.cornerRadius = MIN(self.frame.size.width, self.frame.size.height) / 200.0 * propCornerRadius;
     self.layer.borderWidth = propStrokeWidth;
 
+    // Optional "icon": an SF Symbol name (e.g. "arrow.up"). When the symbol
+    // exists the button shows only the icon; otherwise it falls back to "name".
+    UIImage *icon = nil;
+    NSString *iconName = self.properties[@"icon"];
+    if ([iconName isKindOfClass:NSString.class] && iconName.length > 0) {
+        CGFloat pointSize = MAX(MIN(propW, propH) * 0.42, 10.0);
+        UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration
+            configurationWithPointSize:pointSize weight:UIImageSymbolWeightBold];
+        icon = [UIImage systemImageNamed:iconName withConfiguration:config];
+    }
+
     [UIView performWithoutAnimation:^{
-        [self setTitle:self.properties[@"name"] forState:UIControlStateNormal];
+        [self setImage:icon forState:UIControlStateNormal];
+        [self setTitle:(icon ? nil : self.properties[@"name"]) forState:UIControlStateNormal];
         [self layoutIfNeeded];
     }];
 }

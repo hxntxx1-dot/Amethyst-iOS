@@ -5,7 +5,31 @@
 #import "../utils.h"
 #include "../glfw_keycodes.h"
 
+/*
+ * On-screen joystick.
+ *
+ * Two modes:
+ *  - Classic (default): a fixed stick, same behaviour as upstream Amethyst.
+ *  - Floating ("floating": true): Roblox-style dynamic thumbstick. The control's
+ *    frame becomes a touch *zone*; the stick appears where the finger lands and
+ *    follows the finger when it is dragged past the edge of the ring.
+ *
+ * Extra optional JSON properties (all optional, upstream layouts keep working):
+ *  floating        bool   Roblox-style dynamic stick (default false)
+ *  stickSize       float  diameter of the ring in floating mode, dp (default 150)
+ *  deadzone        float  0..1, ratio of the radius that does nothing
+ *                         (default 0.35 classic / 0.2 floating)
+ *  autoSprint      bool   hold the sprint key (Left Ctrl) when the stick is
+ *                         pushed forward to the edge (default false)
+ *  sprintThreshold float  0..1, how far forward for autoSprint (default 0.9)
+ *  thumbColor      int    ARGB colour of the knob (default black classic /
+ *                         translucent white floating)
+ *  idleOpacity     float  0..1, opacity of the resting stick in floating mode
+ *                         (default 0.4, 0 = invisible until touched)
+ */
+
 // Left thumbstick directions
+#define DIRECTION_NONE -1
 #define DIRECTION_EAST 0
 #define DIRECTION_NORTH_EAST 1
 #define DIRECTION_NORTH 2
@@ -26,7 +50,11 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
 @interface ControlJoystick()
 @property(nonatomic) UIView *background, *thumb;
 @property(nonatomic) UIButton *fwdLockView;
+@property(nonatomic) UILabel *zoneLabel;
 @property(nonatomic) CGPoint mCenter;
+@property(nonatomic, weak) UITouch *activeTouch;
+@property(nonatomic) int lastDirection;
+@property(nonatomic) BOOL sprintHeld;
 @end
 
 @implementation ControlJoystick
@@ -34,13 +62,27 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
 + (id)buttonWithProperties:(NSMutableDictionary *)propArray {
     ControlJoystick *instance = [super buttonWithProperties:propArray];
     instance.clipsToBounds = NO;
+    instance.multipleTouchEnabled = NO;
+    instance.lastDirection = -2;
     instance.background = [UIView new];
+    instance.background.userInteractionEnabled = NO;
     instance.thumb = [UIView new];
+    instance.thumb.userInteractionEnabled = NO;
     instance.thumb.backgroundColor = UIColor.blackColor;
     [instance addSubview:instance.background];
     [instance addSubview:instance.thumb];
 
-    if (!isControlModifiable && [propArray[@"forwardLock"] boolValue]) {
+    instance.zoneLabel = [UILabel new];
+    instance.zoneLabel.text = localize(@"custom_controls.joystick.floating_zone", nil);
+    instance.zoneLabel.textColor = UIColor.whiteColor;
+    instance.zoneLabel.font = [UIFont boldSystemFontOfSize:13];
+    instance.zoneLabel.textAlignment = NSTextAlignmentCenter;
+    instance.zoneLabel.adjustsFontSizeToFitWidth = YES;
+    instance.zoneLabel.userInteractionEnabled = NO;
+    instance.zoneLabel.hidden = YES;
+    [instance addSubview:instance.zoneLabel];
+
+    if (!isControlModifiable && [propArray[@"forwardLock"] boolValue] && ![propArray[@"floating"] boolValue]) {
         instance.fwdLockView = [UIButton buttonWithType:UIButtonTypeCustom];
         instance.fwdLockView.hidden = YES;
         instance.fwdLockView.imageEdgeInsets = UIEdgeInsetsMake(4, 4, 4, 4);
@@ -52,157 +94,265 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
     return instance;
 }
 
+#pragma mark - Properties helpers
+
+- (BOOL)isFloating {
+    return [self.properties[@"floating"] boolValue];
+}
+
+- (CGFloat)floatProperty:(NSString *)key fallback:(CGFloat)fallback {
+    id value = self.properties[key];
+    if ([value isKindOfClass:NSNumber.class]) {
+        return [value floatValue];
+    }
+    return fallback;
+}
+
+- (CGFloat)stickSize {
+    CGFloat minSize = MIN(self.bounds.size.width, self.bounds.size.height);
+    if (![self isFloating]) {
+        return minSize;
+    }
+    CGFloat size = [self floatProperty:@"stickSize" fallback:150.0];
+    return MAX(40.0, size);
+}
+
+- (CGFloat)thumbSize {
+    return [self isFloating] ? [self stickSize] * 0.4 : [self stickSize] / 4.0;
+}
+
+- (CGFloat)maxRadius {
+    if ([self isFloating]) {
+        // Knob centre can travel up to the ring edge, like Roblox
+        return [self stickSize] / 2.0;
+    }
+    return [self stickSize] / 2.0 - [self thumbSize] / 2.0;
+}
+
+- (CGFloat)deadzone {
+    CGFloat value = [self floatProperty:@"deadzone" fallback:([self isFloating] ? 0.2 : 0.35)];
+    return MIN(MAX(value, 0.0), 0.95);
+}
+
+- (CGPoint)restCenter {
+    if (![self isFloating]) {
+        return CGPointMake(self.bounds.size.width / 2.0, self.bounds.size.height / 2.0);
+    }
+    CGFloat half = [self stickSize] / 2.0;
+    CGFloat inset = 24.0;
+    CGFloat x = MIN(half + inset, self.bounds.size.width / 2.0);
+    CGFloat y = MAX(self.bounds.size.height - half - inset, self.bounds.size.height / 2.0);
+    return CGPointMake(x, y);
+}
+
+- (void)setStickActive:(BOOL)active {
+    if (![self isFloating]) {
+        self.background.alpha = self.thumb.alpha = 1.0;
+        return;
+    }
+    CGFloat idle = MIN(MAX([self floatProperty:@"idleOpacity" fallback:0.4], 0.0), 1.0);
+    CGFloat alpha = (active || isControlModifiable) ? 1.0 : idle;
+    self.background.alpha = self.thumb.alpha = alpha;
+}
+
+#pragma mark - Touch handling
+
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    if (isControlModifiable || touches.count != 1) return;
-    if (touches.anyObject.view == self) {
-        self.thumb.center = [touches.anyObject locationInView:self];
+    if (isControlModifiable) return;
+    if (self.activeTouch != nil) return; // already driven by another finger
+
+    UITouch *touch = touches.anyObject;
+    if (touch.view != self) return;
+    self.activeTouch = touch;
+
+    CGPoint location = [touch locationInView:self];
+    if ([self isFloating]) {
+        // Spawn the stick under the finger
+        self.mCenter = location;
+        self.background.center = self.mCenter;
+        self.thumb.center = self.mCenter;
+        [self setStickActive:YES];
+    } else {
+        self.thumb.center = location;
+        if (isGrabbing && self.fwdLockView) {
+            self.fwdLockView.center = CGPointMake(self.mCenter.x, -self.mCenter.y);
+        }
     }
-    if (isGrabbing && self.fwdLockView) {
-        self.fwdLockView.center = CGPointMake(self.mCenter.x, -self.mCenter.y);
-    }
-    // pass this touch through the move handler
-    [self touchesMoved:touches withEvent:event];
+    [self handleTouchAt:location];
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    if (isControlModifiable || touches.count != 1) return;
-    UITouch *touch = touches.anyObject;
-
-    //CGPoint prev = [touches.anyObject previousLocationInView:self];
-    //CGPoint loc = [touches.anyObject locationInView:self];
-
-    CGPoint center = [touches.anyObject locationInView:self];
-    //self.thumb.center;
-    //center.x += loc.x - prev.x;
-    //center.y += loc.y - prev.y;
-
-    CGFloat dirX = center.x - self.mCenter.x;
-    CGFloat dirY = center.y - self.mCenter.y;
-    CGFloat radius = sqrt(dirX*dirX + dirY*dirY);
-    CGFloat maxRadius = MIN(self.mCenter.x, self.mCenter.y) - self.thumb.frame.size.width/2;
-    if (radius > maxRadius) {
-        center.x = dirX*maxRadius/radius + self.mCenter.x;
-        center.y = dirY*maxRadius/radius + self.mCenter.y;
-    }
-    self.thumb.center = center;
-
-    CGFloat deadzone = 0.35;
-    if (!isGrabbing || radius >= maxRadius*deadzone) {
-        [self callbackMoveX:((center.x / self.frame.size.width)*2-1) Y:((-center.y / self.frame.size.height)*2+1)];
-    }
-
-#ifdef DEBUG_JOYSTICK
-    [UIView performWithoutAnimation:^{
-        [self setTitle:[NSString stringWithFormat:@"rad=%f\nCX=%f\nCY=%f", radius, self.mCenter.x / radius, self.mCenter.y / radius] forState:UIControlStateNormal];
-        [self layoutIfNeeded];
-    }];
-#endif
-}
-
-- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event {
     if (isControlModifiable) return;
-
-    lastXValue = lastYValue = 0;
-    if (isGrabbing && self.fwdLockView && CGRectContainsPoint(self.fwdLockView.frame, [touches.anyObject locationInView:self])) {
-        self.fwdLockView.center = self.thumb.center;
-    } else {
-        self.thumb.center = self.mCenter;
-        [self callbackMoveX:0 Y:0];
-    }
+    if (self.activeTouch == nil || ![touches containsObject:self.activeTouch]) return;
+    [self handleTouchAt:[self.activeTouch locationInView:self]];
 }
 
-- (void)callbackMoveX:(CGFloat)xValue Y:(CGFloat)yValue {
-#ifdef DEBUG_JOYSTICK
-    static UILabel *debugLabel;
-    if (debugLabel == nil) {
-        debugLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 200, 200)];
-        debugLabel.lineBreakMode = NSLineBreakByWordWrapping;
-        debugLabel.numberOfLines = 0;
-        debugLabel.userInteractionEnabled = NO;
-        [UIWindow.mainWindow addSubview:debugLabel];
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (isControlModifiable) return;
+    if (self.activeTouch == nil || ![touches containsObject:self.activeTouch]) return;
+    CGPoint location = [self.activeTouch locationInView:self];
+    self.activeTouch = nil;
+    lastXValue = lastYValue = 0;
+
+    if (isGrabbing && self.fwdLockView && !self.fwdLockView.hidden &&
+        CGRectContainsPoint(self.fwdLockView.frame, location)) {
+        // Forward lock: keep walking forward
+        self.thumb.center = self.fwdLockView.center;
+        return;
     }
-#endif
+    [self resetStick];
+}
+
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (isControlModifiable) return;
+    if (self.activeTouch == nil || ![touches containsObject:self.activeTouch]) return;
+    self.activeTouch = nil;
+    lastXValue = lastYValue = 0;
+    [self resetStick];
+}
+
+- (void)resetStick {
+    [self applyDirection:DIRECTION_NONE sprint:NO];
+    self.mCenter = [self restCenter];
+    self.background.center = self.mCenter;
+    self.thumb.center = self.mCenter;
+    [self setStickActive:NO];
+}
+
+- (void)handleTouchAt:(CGPoint)location {
+    CGFloat maxRadius = MAX([self maxRadius], 1.0);
+    CGFloat dirX = location.x - self.mCenter.x;
+    CGFloat dirY = location.y - self.mCenter.y;
+    CGFloat radius = sqrt(dirX*dirX + dirY*dirY);
+
+    if (radius > maxRadius) {
+        if ([self isFloating]) {
+            // Drag the whole stick along with the finger
+            CGPoint center = self.mCenter;
+            center.x = location.x - dirX * maxRadius / radius;
+            center.y = location.y - dirY * maxRadius / radius;
+            self.mCenter = center;
+            self.background.center = center;
+        }
+        dirX = dirX * maxRadius / radius;
+        dirY = dirY * maxRadius / radius;
+        radius = maxRadius;
+    }
+    self.thumb.center = CGPointMake(self.mCenter.x + dirX, self.mCenter.y + dirY);
+
+    // Normalised -1..1, Y up
+    CGFloat xValue = dirX / maxRadius;
+    CGFloat yValue = -dirY / maxRadius;
+    CGFloat magnitude = radius / maxRadius;
 
     if (!isGrabbing) {
-        // Update virtual mouse position
+        // In menus the stick moves the virtual mouse
+        [self applyDirection:DIRECTION_NONE sprint:NO];
         lastXValue = xValue;
         lastYValue = yValue;
         return;
     }
 
-    static char lastDirection = -2;
-    char direction = -1;
-    if (xValue != 0 && yValue != 0) {
-        CGFloat degree = atan2f(yValue, xValue) * (180.0 / M_PI);
-        if (degree < 0) {
-            degree += 360;
-        }
-        direction = (int)((degree+22.5)/45.0) % 8;
-#ifdef DEBUG_JOYSTICK
-        debugLabel.text = [NSString stringWithFormat:@"x=%f\ny=%f\natan=%f\ndeg=%f\ndirection=%d, last=%d\npressW=%d A=%d S=%d D=%d", atan2f(yValue, xValue), xValue, yValue, degree, direction, lastDirection,
-            direction >= DIRECTION_NORTH_EAST &&
-            direction <= DIRECTION_NORTH_WEST,
-            direction >= DIRECTION_NORTH_WEST &&
-            direction <= DIRECTION_SOUTH_WEST,
-            direction >= DIRECTION_SOUTH_WEST &&
-            direction <= DIRECTION_SOUTH_EAST,
-            direction == DIRECTION_SOUTH_EAST ||
-            direction == DIRECTION_EAST ||
-            direction == DIRECTION_NORTH_EAST];
-#endif
-    }
-    if (lastDirection == direction) {
+    if (magnitude < [self deadzone]) {
+        // Back in the dead zone: release every key
+        [self applyDirection:DIRECTION_NONE sprint:NO];
         return;
     }
 
-    // Update WASD states
-    int mod = leftShiftHeld ? GLFW_MOD_SHIFT : 0;
-    CallbackBridge_nativeSendKey(GLFW_KEY_W, 0,
-        direction >= DIRECTION_NORTH_EAST &&
-        direction <= DIRECTION_NORTH_WEST,
-        mod);
-    CallbackBridge_nativeSendKey(GLFW_KEY_A, 0,
-        direction >= DIRECTION_NORTH_WEST &&
-        direction <= DIRECTION_SOUTH_WEST,
-        mod);
-    CallbackBridge_nativeSendKey(GLFW_KEY_S, 0,
-        direction >= DIRECTION_SOUTH_WEST &&
-        direction <= DIRECTION_SOUTH_EAST,
-        mod);
-    CallbackBridge_nativeSendKey(GLFW_KEY_D, 0,
-        direction == DIRECTION_SOUTH_EAST ||
-        direction == DIRECTION_EAST ||
-        direction == DIRECTION_NORTH_EAST,
-        mod);
+    CGFloat degree = atan2(yValue, xValue) * (180.0 / M_PI);
+    if (degree < 0) {
+        degree += 360;
+    }
+    int direction = (int)((degree + 22.5) / 45.0) % 8;
 
-    self.fwdLockView.hidden = direction != DIRECTION_NORTH;
-    lastDirection = direction;
+    BOOL sprint = NO;
+    if ([self.properties[@"autoSprint"] boolValue]) {
+        CGFloat threshold = [self floatProperty:@"sprintThreshold" fallback:0.9];
+        sprint = magnitude >= threshold &&
+            direction >= DIRECTION_NORTH_EAST && direction <= DIRECTION_NORTH_WEST;
+    }
+    [self applyDirection:direction sprint:sprint];
 }
 
-- (void)setFrame:(CGRect)frame {
-    // Keep the frame square
-    if (self.frame.size.width != frame.size.width) {
-        frame.size.height = frame.size.width;
-    } else if (self.frame.size.height != frame.size.height) {
-        frame.size.width = frame.size.height;
+- (void)applyDirection:(int)direction sprint:(BOOL)sprint {
+    int mod = leftShiftHeld ? GLFW_MOD_SHIFT : 0;
+
+    if (self.lastDirection != direction) {
+        BOOL none = direction == DIRECTION_NONE;
+        // Update WASD states
+        CallbackBridge_nativeSendKey(GLFW_KEY_W, 0,
+            !none &&
+            direction >= DIRECTION_NORTH_EAST &&
+            direction <= DIRECTION_NORTH_WEST,
+            mod);
+        CallbackBridge_nativeSendKey(GLFW_KEY_A, 0,
+            !none &&
+            direction >= DIRECTION_NORTH_WEST &&
+            direction <= DIRECTION_SOUTH_WEST,
+            mod);
+        CallbackBridge_nativeSendKey(GLFW_KEY_S, 0,
+            !none &&
+            direction >= DIRECTION_SOUTH_WEST &&
+            direction <= DIRECTION_SOUTH_EAST,
+            mod);
+        CallbackBridge_nativeSendKey(GLFW_KEY_D, 0,
+            !none && (
+            direction == DIRECTION_SOUTH_EAST ||
+            direction == DIRECTION_EAST ||
+            direction == DIRECTION_NORTH_EAST),
+            mod);
+
+        self.fwdLockView.hidden = direction != DIRECTION_NORTH;
+        self.lastDirection = direction;
     }
-    
+
+    if (self.sprintHeld != sprint) {
+        CallbackBridge_nativeSendKey(GLFW_KEY_LEFT_CONTROL, 0, sprint, mod);
+        self.sprintHeld = sprint;
+    }
+}
+
+#pragma mark - Layout
+
+- (void)setFrame:(CGRect)frame {
+    if (![self isFloating]) {
+        // Keep the frame square
+        if (self.frame.size.width != frame.size.width) {
+            frame.size.height = frame.size.width;
+        } else if (self.frame.size.height != frame.size.height) {
+            frame.size.width = frame.size.height;
+        }
+    }
+
     [super setFrame:frame];
-    self.mCenter = CGPointMake(frame.size.width/2, frame.size.height/2);
-    CGFloat minSize = MIN(frame.size.width, frame.size.height);
+    [self layoutStick];
+}
 
-    self.fwdLockView.frame = CGRectMake(0, 0, minSize/4, minSize/4);
-    [self.fwdLockView setImage:[UIImage systemImageNamed:@"lock"] forState:UIControlStateNormal];
-    self.fwdLockView.layer.cornerRadius = self.fwdLockView.frame.size.width/2;
+- (void)layoutStick {
+    CGFloat stickSize = [self stickSize];
+    CGFloat thumbSize = [self thumbSize];
 
-    self.thumb.frame = CGRectMake(0, 0, minSize/4, minSize/4);
-    self.thumb.center = self.mCenter;
-    self.thumb.layer.cornerRadius = self.thumb.frame.size.width/2;
+    if (self.fwdLockView) {
+        self.fwdLockView.frame = CGRectMake(0, 0, stickSize/4, stickSize/4);
+        [self.fwdLockView setImage:[UIImage systemImageNamed:@"lock"] forState:UIControlStateNormal];
+        self.fwdLockView.layer.cornerRadius = self.fwdLockView.frame.size.width/2;
+    }
 
-    CGFloat bgSize = minSize - self.thumb.frame.size.width + self.background.layer.borderWidth/2;
+    self.thumb.frame = CGRectMake(0, 0, thumbSize, thumbSize);
+    self.thumb.layer.cornerRadius = thumbSize/2;
+
+    CGFloat bgSize = [self isFloating] ? stickSize :
+        stickSize - thumbSize + self.background.layer.borderWidth/2;
     self.background.frame = CGRectMake(0, 0, bgSize, bgSize);
     self.background.layer.cornerRadius = bgSize/2;
+
+    if (self.activeTouch == nil) {
+        self.mCenter = [self restCenter];
+    }
     self.background.center = self.mCenter;
+    self.thumb.center = self.mCenter;
+
+    self.zoneLabel.frame = CGRectMake(8, 8, MAX(self.bounds.size.width - 16, 0), 20);
 }
 
 - (void)update {
@@ -214,6 +364,7 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
     // net/kdt/pojavlaunch/customcontrols/ControlData.update()
     [self preProcessProperties];
 
+    BOOL floating = [self isFloating];
     NSString *propDynamicX = (NSString *) self.properties[@"dynamicX"];
     NSString *propDynamicY = (NSString *) self.properties[@"dynamicY"];
 
@@ -225,7 +376,14 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
 
     self.background.backgroundColor = self.fwdLockView.backgroundColor = convertARGB2UIColor(propBackgroundColor);
     self.background.layer.borderColor = [convertARGB2UIColor(propStrokeColor) CGColor];
-    self.background.layer.borderWidth = propStrokeWidth + 1;
+    self.background.layer.borderWidth = propStrokeWidth + (floating ? 2 : 1);
+
+    if (self.properties[@"thumbColor"]) {
+        self.thumb.backgroundColor = convertARGB2UIColor([self.properties[@"thumbColor"] intValue]);
+    } else {
+        self.thumb.backgroundColor = floating ?
+            [UIColor colorWithWhite:1.0 alpha:0.85] : UIColor.blackColor;
+    }
 
     // Calculate dynamic position
     CGFloat propX = [self calculateDynamicPos:propDynamicX];
@@ -235,7 +393,27 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
     self.frame = CGRectMake(propX, propY, propW, propH);
     self.alpha = [self.properties[@"opacity"] floatValue];
     self.alpha = MAX(self.alpha, isControlModifiable ? 0.1 : 0.01);
-    self.layer.cornerRadius = MIN(self.frame.size.width, self.frame.size.height) / 2.0;
+
+    if (floating) {
+        // The zone itself is invisible while playing, outlined while editing
+        self.backgroundColor = isControlModifiable ?
+            [UIColor colorWithWhite:1.0 alpha:0.12] : UIColor.clearColor;
+        self.layer.borderWidth = isControlModifiable ? 1.5 : 0;
+        self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.6].CGColor;
+        self.layer.cornerRadius = 12.0;
+        self.zoneLabel.hidden = !isControlModifiable;
+        // The zone is large: keep it behind every button so that buttons
+        // overlapping it (e.g. an opened drawer) still receive their taps
+        if (self.superview.subviews.firstObject != self) {
+            [self.superview sendSubviewToBack:self];
+        }
+    } else {
+        self.backgroundColor = UIColor.clearColor;
+        self.layer.borderWidth = 0;
+        self.layer.cornerRadius = MIN(self.frame.size.width, self.frame.size.height) / 2.0;
+        self.zoneLabel.hidden = YES;
+    }
+    [self setStickActive:self.activeTouch != nil];
 }
 
 @end

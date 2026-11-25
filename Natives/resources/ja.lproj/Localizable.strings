@@ -187,3 +187,6 @@
 "preference.title.debug_show_layout_overlap" = "レイアウト重複を表示";
 "preference.detail.debug_show_layout_overlap" = "透明な色ですべてのビューをオーバーレイし、重複するビューを表示します。";
 "controller_configurator.playstation.title.named_back" = "選択...";
+"custom_controls.button_edit.floating" = "出現型（触った所に出る）";
+"custom_controls.button_edit.auto_sprint" = "自動ダッシュ（前に倒し切る）";
+"custom_controls.joystick.floating_zone" = "スティック出現エリア";

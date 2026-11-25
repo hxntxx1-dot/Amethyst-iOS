@@ -13,6 +13,8 @@ on:
 jobs:
   build:
     name: Development build
+    # Upstream's self-hosted runner only exists on the original repository
+    if: github.repository == 'AngelAuraMC/Amethyst-iOS'
     strategy:
       matrix:
         include:
