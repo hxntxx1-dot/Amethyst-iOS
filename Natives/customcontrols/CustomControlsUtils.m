@@ -501,6 +501,7 @@ void initKeycodeTable(NSMutableArray* keyCodeMap, NSMutableArray* keyValueMap) {
     [keyCodeMap addObject:@(#key)]; \
     [keyValueMap addObject:@(key)];
 
+    addspec(SPECIALBTN_MENURIGHT)
     addspec(SPECIALBTN_MENU)
     addspec(SPECIALBTN_SCROLLDOWN)
     addspec(SPECIALBTN_SCROLLUP)

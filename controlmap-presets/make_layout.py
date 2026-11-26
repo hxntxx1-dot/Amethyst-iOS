@@ -29,8 +29,8 @@ def button(name, keys, x, y, w, h, icon=None, game=True, menu=False, toggle=Fals
 def at(xdp):  # left offset in dp -> expression (px)
     return f"px({xdp})"
 
-S = 52      # top bar button size (dp)
-STEP = 60   # spacing
+S = 60      # top bar button size (dp)
+STEP = 68   # spacing
 TOP = "px(10)"
 
 controls = [
@@ -41,22 +41,22 @@ controls = [
     # ---- top-left bar (menus / inventory) ----
     button("✕", [KEY["ESC"]], at(10), TOP, S, S, icon="xmark", game=False, menu=True),
     button("キーボード", [KEYBOARD], at(10 + STEP*1), TOP, S, S, icon="keyboard", game=False, menu=True),
-    # ---- always-visible essentials above jump / attack ----
-    button("しゃがむ", [KEY["LSHIFT"]], "${screen_width} - ${width} - px(64)",
-           "${screen_height} - ${height} - px(176)", 72, 72, icon="arrow.down.to.line",
+    # ---- right-thumb cluster (bigger, Roblox-like) ----
+    button("しゃがむ", [KEY["LSHIFT"]], "${screen_width} - ${width} - px(60)",
+           "${screen_height} - ${height} - px(176)", 80, 80, icon="arrow.down.to.line",
            menu=True, toggle=True, radius=100, stroke=2, bg=argb(0x99000000), iconOn="arrow.down.to.line.compact"),
-    button("ダッシュ", [341], "${screen_width} - ${width} - px(184)",
-           "${screen_height} - ${height} - px(176)", 72, 72, icon="tortoise.fill",
+    button("ダッシュ", [341], "${screen_width} - ${width} - px(188)",
+           "${screen_height} - ${height} - px(176)", 80, 80, icon="tortoise.fill",
            toggle=True, radius=100, stroke=2, bg=argb(0x99000000), iconOn="hare.fill"),
-    # ---- attack / break button (left of jump). Tap gestures only give right click,
-    #      and long-press (400 ms) is too slow for fighting ----
-    button("攻撃", [-3], "${screen_width} - ${width} - px(178)",
-           "${screen_height} - ${height} - px(62)", 84, 84, icon="hammer.fill", radius=100, stroke=2,
+    button("攻撃", [-3], "${screen_width} - ${width} - px(180)",
+           "${screen_height} - ${height} - px(52)", 96, 96, icon="hammer.fill", radius=100, stroke=2,
            bg=argb(0x66000000)),
-    # ---- Roblox-style jump button (bottom right) ----
-    button("ジャンプ", [KEY["SPACE"]], "${screen_width} - ${width} - px(44)",
-           "${screen_height} - ${height} - px(48)", 112, 112, icon="arrow.up", radius=100, stroke=2,
+    button("ジャンプ", [KEY["SPACE"]], "${screen_width} - ${width} - px(40)",
+           "${screen_height} - ${height} - px(40)", 120, 120, icon="arrow.up", radius=100, stroke=2,
            bg=argb(0x66000000)),
+    # ---- menus only: right-click mode (half a stack / one item each) ----
+    button("右クリック", [-10], at(10 + STEP*2), TOP, S, S, icon="cursorarrow.click.2",
+           game=False, menu=True, toggle=True, bg=argb(0x99000000), iconOn="cursorarrow.click.2"),
 ]
 
 # ---- "≡" drawer with everything else, opening downwards as a list ----
@@ -74,7 +74,7 @@ items = [
 ]
 sub = []
 for i, (name, keys, toggle) in enumerate(items):
-    sub.append(button(name, keys, at(10), f"px({10 + STEP + i*50})", 190, 44,
+    sub.append(button(name, keys, at(10), f"px({10 + STEP + i*58})", 220, 52,
                       game=True, menu=False, toggle=toggle, radius=25))
 drawer = {
     "orientation": "FREE",

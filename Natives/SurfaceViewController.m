@@ -55,6 +55,9 @@ static GameSurfaceView* pojavWindow;
     shouldTriggerClick, shouldTriggerHaptic, slideableHotbar, toggleHidden;
 
 @property(nonatomic) BOOL enableMouseGestures, enableHotbarGestures;
+// Menus: a finger acts like a PC mouse (press on touch down, drag, release on lift)
+@property(nonatomic) BOOL directMenuTouch;
+@property(nonatomic) int directPressedButton;
 
 @property(nonatomic) UIImpactFeedbackGenerator *lightHaptic;
 @property(nonatomic) UIImpactFeedbackGenerator *mediumHaptic;
@@ -73,6 +76,7 @@ static GameSurfaceView* pojavWindow;
 {
     [super viewDidLoad];
     isControlModifiable = NO;
+    self.directPressedButton = -1;
     self.isMacCatalystApp = NSProcessInfo.processInfo.isMacCatalystApp;
     // Load MetalHUD library
     dlopen("/usr/lib/libMTLHud.dylib", 0);
@@ -340,6 +344,7 @@ static GameSurfaceView* pojavWindow;
     self.slideableHotbar = getPrefBool(@"control.slideable_hotbar");
     self.enableMouseGestures = getPrefBool(@"control.gesture_mouse");
     self.enableHotbarGestures = getPrefBool(@"control.gesture_hotbar");
+    self.directMenuTouch = getPrefBool(@"control.menu_direct_touch");
     self.shouldTriggerHaptic = !getPrefBool(@"control.disable_haptics");
 
     self.scrollPanGesture.enabled = self.enableMouseGestures;
@@ -512,6 +517,19 @@ static GameSurfaceView* pojavWindow;
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
 }
 
+static BOOL menuRightClickMode = NO;
+
+- (BOOL)isDirectMenuTouchActive {
+    return self.directMenuTouch && !isGrabbing && !virtualMouseEnabled;
+}
+
+- (void)releaseDirectMenuPress {
+    if (self.directPressedButton >= 0) {
+        CallbackBridge_nativeSendMouseButton(self.directPressedButton, 0, 0);
+        self.directPressedButton = -1;
+    }
+}
+
 #pragma mark - Input: send touch utilities
 
 - (BOOL)isTouchInactive:(UITouch *)touch {
@@ -614,6 +632,14 @@ static GameSurfaceView* pojavWindow;
                 locationInView.y -= prevLocationInView.y;
             }
             [self sendTouchPoint:locationInView withEvent:event];
+            if (event == ACTION_DOWN && [self isDirectMenuTouchActive]) {
+                // PC-mouse style: press as soon as the finger lands, so that
+                // dragging over slots spreads a stack (20 -> 5/5/5/5)
+                [self releaseDirectMenuPress];
+                self.directPressedButton = menuRightClickMode ?
+                    GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT;
+                CallbackBridge_nativeSendMouseButton(self.directPressedButton, 1, 0);
+            }
         }
     //}
 }
@@ -699,6 +725,7 @@ static GameSurfaceView* pojavWindow;
     }
     
     if (!self.shouldTriggerClick) return;
+    if ([self isDirectMenuTouchActive]) return; // already clicked on touch down/up
 
     if (sender.state == UIGestureRecognizerStateRecognized) {
         if (currentHotbarSlot == -1) {
@@ -766,6 +793,10 @@ static GameSurfaceView* pojavWindow;
         }
     }
     
+    if ([self isDirectMenuTouchActive] && self.directPressedButton >= 0) {
+        return; // the finger is already holding the mouse button
+    }
+
     if (!self.slideableHotbar) {
         CGPoint location = [sender locationInView:self.rootView];
         CGFloat screenScale = UIScreen.mainScreen.scale;
@@ -879,6 +910,10 @@ static GameSurfaceView* pojavWindow;
                         setPrefBool(@"control.virtmouse_enable", virtualMouseEnabled);
                         [self setNeedsUpdateOfPrefersPointerLocked];
                     }
+                    break;
+
+                case SPECIALBTN_MENURIGHT:
+                    menuRightClickMode = held;
                     break;
 
                 case SPECIALBTN_MENU:
@@ -1028,6 +1063,12 @@ int touchesMovedCount;
     for (UITouch *touch in touches) {
         if (touch.type == UITouchTypeIndirectPointer) {
             continue; // handle this in a different place
+        }
+        if (touch == self.primaryTouch && self.directPressedButton >= 0) {
+            if (!isGrabbing) {
+                [self sendTouchPoint:[touch locationInView:self.rootView] withEvent:ACTION_MOVE];
+            }
+            [self releaseDirectMenuPress];
         }
         [self sendTouchEvent:touch withUIEvent:event withEvent:ACTION_UP];
     }

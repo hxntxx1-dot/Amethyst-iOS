@@ -48,6 +48,7 @@
 #define SPECIALBTN_SCROLLUP -7
 #define SPECIALBTN_SCROLLDOWN -8
 #define SPECIALBTN_MENU -9
+#define SPECIALBTN_MENURIGHT -10 // menus: touches use the right mouse button while ON
 
 #define NSDebugLog(...) if (debugLogEnabled) { NSLog(__VA_ARGS__); }
 BOOL debugLogEnabled, isJailbroken;

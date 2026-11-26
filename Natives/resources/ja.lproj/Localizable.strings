@@ -190,3 +190,5 @@
 "custom_controls.button_edit.floating" = "出現型（触った所に出る）";
 "custom_controls.button_edit.auto_sprint" = "自動ダッシュ（前に倒し切る）";
 "custom_controls.joystick.floating_zone" = "スティック出現エリア";
+"preference.title.menu_direct_touch" = "メニューでPCのマウスのように操作";
+"preference.detail.menu_direct_touch" = "インベントリで、指を置いた瞬間にクリック、なぞると均等に分ける、離すとボタンを離す（PCのマウスを押したまま動かすのと同じ）";

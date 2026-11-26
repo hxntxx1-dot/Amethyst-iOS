@@ -335,3 +335,5 @@
 "custom_controls.button_edit.floating" = "Floating (appears where you touch)";
 "custom_controls.button_edit.auto_sprint" = "Auto sprint (push forward fully)";
 "custom_controls.joystick.floating_zone" = "Stick zone";
+"preference.title.menu_direct_touch" = "Mouse-like touch in menus";
+"preference.detail.menu_direct_touch" = "In inventories a finger works like a PC mouse: touching presses, dragging over slots spreads a stack evenly, lifting releases";
